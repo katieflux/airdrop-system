@@ -6,51 +6,31 @@ import {SepoliaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {IERC7984} from "@openzeppelin/confidential-contracts/interfaces/IERC7984.sol";
 
 /// @title Encrypted token airdrop powered by Zama FHEVM
-/// @notice Allows an owner to configure encrypted allocations that recipients can decrypt and claim
+/// @notice Allows anyone to configure encrypted allocations that recipients can decrypt and claim
 contract EncryptedAirdrop is SepoliaConfig {
     IERC7984 public immutable token;
-    address private _owner;
 
     mapping(address account => euint64 amount) private _allocations;
     mapping(address account => bool) private _hasAllocation;
     mapping(address account => bool) private _claimed;
 
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event TokensDeposited(address indexed funder, euint64 encryptedAmount);
     event AllocationConfigured(address indexed recipient, euint64 encryptedAmount, bool isUpdate);
     event AllocationCleared(address indexed recipient);
     event AirdropClaimed(address indexed recipient, euint64 encryptedAmount);
 
-    error NotOwner();
     error ZeroAddress();
     error NoAllocation();
     error AlreadyClaimed();
     error LengthMismatch();
-
-    modifier onlyOwner() {
-        if (msg.sender != _owner) revert NotOwner();
-        _;
-    }
+    error UnauthorizedClear();
 
     constructor(IERC7984 token_) {
         if (address(token_) == address(0)) revert ZeroAddress();
         token = token_;
-        _owner = msg.sender;
-        emit OwnershipTransferred(address(0), msg.sender);
     }
 
-    function owner() external view returns (address) {
-        return _owner;
-    }
-
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert ZeroAddress();
-        address previousOwner = _owner;
-        _owner = newOwner;
-        emit OwnershipTransferred(previousOwner, newOwner);
-    }
-
-    function depositTokens(externalEuint64 encryptedAmount, bytes calldata inputProof) external onlyOwner {
+    function depositTokens(externalEuint64 encryptedAmount, bytes calldata inputProof) external {
         euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
         FHE.allow(amount, address(token));
         FHE.allow(amount, msg.sender);
@@ -64,7 +44,7 @@ contract EncryptedAirdrop is SepoliaConfig {
         address recipient,
         externalEuint64 encryptedAmount,
         bytes calldata inputProof
-    ) public onlyOwner {
+    ) public {
         if (recipient == address(0)) revert ZeroAddress();
 
         bool isUpdate = _hasAllocation[recipient] || _claimed[recipient];
@@ -85,7 +65,7 @@ contract EncryptedAirdrop is SepoliaConfig {
         address[] calldata recipients,
         externalEuint64[] calldata encryptedAmounts,
         bytes[] calldata inputProofs
-    ) external onlyOwner {
+    ) external {
         uint256 length = recipients.length;
         if (length != encryptedAmounts.length || length != inputProofs.length) revert LengthMismatch();
 
@@ -94,8 +74,9 @@ contract EncryptedAirdrop is SepoliaConfig {
         }
     }
 
-    function clearAllocation(address recipient) external onlyOwner {
+    function clearAllocation(address recipient) external {
         if (recipient == address(0)) revert ZeroAddress();
+        if (msg.sender != recipient) revert UnauthorizedClear();
         if (!_hasAllocation[recipient]) revert NoAllocation();
 
         _allocations[recipient] = FHE.asEuint64(0);
