@@ -6,13 +6,13 @@ import { FhevmType } from "@fhevm/hardhat-plugin";
 import type { EncryptedAirdrop, ERC7984Token } from "../types";
 
 describe("EncryptedAirdrop", function () {
-  let owner: Signer;
+  let distributor: Signer;
   let user: Signer;
-  let stranger: Signer;
+  let allocator: Signer;
   let token: ERC7984Token;
   let airdrop: EncryptedAirdrop;
-  let ownerAddress: string;
   let userAddress: string;
+  let allocatorAddress: string;
   let airdropAddress: string;
   let tokenAddress: string;
 
@@ -20,10 +20,10 @@ describe("EncryptedAirdrop", function () {
     await deployments.fixture(["EncryptedAirdrop"]);
 
     const { deployer } = await getNamedAccounts();
-    owner = await ethers.getSigner(deployer);
+    distributor = await ethers.getSigner(deployer);
     const signers = await ethers.getSigners();
     user = signers[1];
-    stranger = signers[2];
+    allocator = signers[2];
 
     const tokenDeployment = await deployments.get("ERC7984Token");
     const airdropDeployment = await deployments.get("EncryptedAirdrop");
@@ -31,16 +31,16 @@ describe("EncryptedAirdrop", function () {
     token = (await ethers.getContractAt(
       "ERC7984Token",
       tokenDeployment.address,
-      owner,
+      distributor,
     )) as unknown as ERC7984Token;
     airdrop = (await ethers.getContractAt(
       "EncryptedAirdrop",
       airdropDeployment.address,
-      owner,
+      distributor,
     )) as unknown as EncryptedAirdrop;
 
-    ownerAddress = await owner.getAddress();
     userAddress = await user.getAddress();
+    allocatorAddress = await allocator.getAddress();
     airdropAddress = airdropDeployment.address;
     tokenAddress = tokenDeployment.address;
 
@@ -56,22 +56,22 @@ describe("EncryptedAirdrop", function () {
     return handle;
   }
 
-  it("allows the owner to configure allocations and users to claim", async function () {
+  it("allows any caller to configure allocations and users to claim", async function () {
     const depositAmount = 500n;
-    const encryptedDeposit = await encryptAmount(depositAmount, owner);
+    const encryptedDeposit = await encryptAmount(depositAmount, distributor);
 
     await expect(
       airdrop
-        .connect(owner)
+        .connect(distributor)
         .depositTokens(encryptedDeposit.handles[0], encryptedDeposit.inputProof),
     ).to.emit(airdrop, "TokensDeposited");
 
     const allocationAmount = 320n;
-    const encryptedAllocation = await encryptAmount(allocationAmount, owner);
+    const encryptedAllocation = await encryptAmount(allocationAmount, distributor);
 
     await expect(
       airdrop
-        .connect(owner)
+        .connect(distributor)
         .setAllocation(userAddress, encryptedAllocation.handles[0], encryptedAllocation.inputProof),
     ).to.emit(airdrop, "AllocationConfigured");
 
@@ -106,26 +106,45 @@ describe("EncryptedAirdrop", function () {
     expect(decryptedBalance).to.equal(allocationAmount);
   });
 
-  it("prevents unauthorized callers from configuring allocations", async function () {
-    const encryptedAmount = await encryptAmount(100n, owner);
+  it("allows different callers to deposit and configure allocations", async function () {
+    const mintAmount = 750n;
+    await token.connect(allocator).mint(allocatorAddress, mintAmount);
+
+    const operatorExpiry = Math.floor(Date.now() / 1000) + 86_400;
+    const setOperatorTx = await token.connect(allocator).setOperator(airdropAddress, operatorExpiry);
+    await setOperatorTx.wait();
+
+    const encryptedDeposit = await encryptAmount(mintAmount, allocator);
+    await expect(
+      airdrop
+        .connect(allocator)
+        .depositTokens(encryptedDeposit.handles[0], encryptedDeposit.inputProof),
+    ).to.emit(airdrop, "TokensDeposited");
+
+    const encryptedAllocation = await encryptAmount(200n, allocator);
+    await expect(
+      airdrop
+        .connect(allocator)
+        .setAllocation(userAddress, encryptedAllocation.handles[0], encryptedAllocation.inputProof),
+    ).to.emit(airdrop, "AllocationConfigured");
+
+    expect(await airdrop.hasAllocation(userAddress)).to.equal(true);
+  });
+
+  it("allows the recipient to clear their allocation", async function () {
+    const encryptedAmount = await encryptAmount(250n, distributor);
+
+    await airdrop
+      .connect(distributor)
+      .setAllocation(userAddress, encryptedAmount.handles[0], encryptedAmount.inputProof);
 
     await expect(
       airdrop
-        .connect(stranger)
-        .setAllocation(userAddress, encryptedAmount.handles[0], encryptedAmount.inputProof),
-    ).to.be.revertedWithCustomError(airdrop, "NotOwner");
-  });
+        .connect(allocator)
+        .clearAllocation(userAddress),
+    ).to.be.revertedWithCustomError(airdrop, "UnauthorizedClear");
 
-  it("allows the owner to reset allocations", async function () {
-    const encryptedAmount = await encryptAmount(250n, owner);
-
-    await airdrop
-      .connect(owner)
-      .setAllocation(userAddress, encryptedAmount.handles[0], encryptedAmount.inputProof);
-
-    expect(await airdrop.hasAllocation(userAddress)).to.equal(true);
-
-    await expect(airdrop.connect(owner).clearAllocation(userAddress))
+    await expect(airdrop.connect(user).clearAllocation(userAddress))
       .to.emit(airdrop, "AllocationCleared")
       .withArgs(userAddress);
 

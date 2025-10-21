@@ -21,7 +21,7 @@ task("task:airdrop-deposit", "Deposit encrypted TEST tokens into the airdrop con
 
     await fhevm.initializeCLIApi();
 
-    const [owner] = await ethers.getSigners();
+    const [caller] = await ethers.getSigners();
     const airdropDeployment = await deployments.get("EncryptedAirdrop");
     const tokenDeployment = await deployments.get("ERC7984Token");
 
@@ -30,15 +30,15 @@ task("task:airdrop-deposit", "Deposit encrypted TEST tokens into the airdrop con
 
     const amount = BigInt(taskArguments.amount);
     const encrypted = await fhevm
-      .createEncryptedInput(airdropDeployment.address, owner.address)
+      .createEncryptedInput(airdropDeployment.address, caller.address)
       .add64(amount)
       .encrypt();
 
-    const txOperator = await token.connect(owner).setOperator(airdropDeployment.address, Math.floor(Date.now() / 1000) + 86_400);
+    const txOperator = await token.connect(caller).setOperator(airdropDeployment.address, Math.floor(Date.now() / 1000) + 86_400);
     await txOperator.wait();
 
     const tx = await airdrop
-      .connect(owner)
+      .connect(caller)
       .depositTokens(encrypted.handles[0], encrypted.inputProof);
     console.log(`Deposit tx: ${tx.hash}`);
     await tx.wait();
@@ -53,19 +53,19 @@ task("task:airdrop-allocate", "Configure an encrypted allocation for a wallet")
 
     await fhevm.initializeCLIApi();
 
-    const [owner] = await ethers.getSigners();
+    const [caller] = await ethers.getSigners();
     const airdropDeployment = await deployments.get("EncryptedAirdrop");
 
     const airdrop = await ethers.getContractAt("EncryptedAirdrop", airdropDeployment.address);
 
     const amount = BigInt(taskArguments.amount);
     const encrypted = await fhevm
-      .createEncryptedInput(airdropDeployment.address, owner.address)
+      .createEncryptedInput(airdropDeployment.address, caller.address)
       .add64(amount)
       .encrypt();
 
     const tx = await airdrop
-      .connect(owner)
+      .connect(caller)
       .setAllocation(taskArguments.recipient, encrypted.handles[0], encrypted.inputProof);
 
     console.log(`Allocation tx: ${tx.hash}`);
