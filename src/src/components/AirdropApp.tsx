@@ -32,7 +32,7 @@ export function AirdropApp() {
               onClick={() => setActiveTab('admin')}
               className={`tab-button ${activeTab === 'admin' ? 'active' : 'inactive'}`}
             >
-              Admin Tools
+              Distribution Tools
             </button>
           </nav>
         </div>
