@@ -8,7 +8,7 @@ export function Header() {
         <div className="header-content">
           <div className="header-left">
             <h1 className="header-title">
-              Encrypted TEST Airdrop
+              Encrypted Airdrop System
             </h1>
             <p className="header-subtitle">Confidential allocations secured by Zama FHEVM</p>
           </div>
